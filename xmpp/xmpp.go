@@ -17,11 +17,11 @@ const (
 	NsHipchat = "http://hipchat.com"
 
 	streamStart = `<stream:stream
-					xmlns='jabber:client'
-					xmlns:stream='http://etherx.jabber.org/streams'
-					from='%s'
-					to='%s'
-					version='1.0'>`
+		xmlns='jabber:client'
+		xmlns:stream='http://etherx.jabber.org/streams'
+		from='%s'
+		to='%s'
+		version='1.0'>`
 	streamEnd = "</stream:stream>"
 )
 
