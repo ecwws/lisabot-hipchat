@@ -12,9 +12,11 @@ import (
 )
 
 const (
-	NsStream  = "http://etherx.jabber.org/streams"
-	NsTLS     = "urn:ietf:params:xml:ns:xmpp-tls"
-	NsHipchat = "http://hipchat.com"
+	NsStream   = "http://etherx.jabber.org/streams"
+	NsTLS      = "urn:ietf:params:xml:ns:xmpp-tls"
+	NsHipchat  = "http://hipchat.com"
+	NsDiscover = "http://jabber.org/protocol/disco#items"
+	NsMuc      = "http://jabber.org/protocol/muc"
 
 	streamStart = `<stream:stream
 		xmlns='jabber:client'
@@ -61,12 +63,16 @@ type xmppIq struct {
 	XMLName xml.Name `xml:"iq"`
 	Type    string   `xml:"type,attr"`
 	Id      string   `xml:"id,attr"`
+	From    string   `xml:"from,attr"`
+	To      string   `xml:"to,attr"`
 	Query   interface{}
 }
 
 type xmppPresence struct {
 	XMLName xml.Name `xml:"presence"`
+	Id      string   `xml:"id,attr,omitempty"`
 	From    string   `xml:"from,attr"`
+	To      string   `xml:"to,attr,omitempty"`
 	Status  interface{}
 }
 
@@ -79,6 +85,17 @@ type xmppAuth struct {
 type xmppShow struct {
 	XMLName xml.Name `xml:"show"`
 	Value   string   `xml:",chardata"`
+}
+
+type Room struct {
+	XMLName xml.Name `xml:"item"`
+	Id      string   `xml:"jid,attr"`
+	Name    string   `xml:"name,attr"`
+}
+
+type xmppDiscover struct {
+	XMLName xml.Name `xml:"iq"`
+	Rooms   []Room   `xml:"query>item"`
 }
 
 func Connect(host string) (*Conn, error) {
@@ -124,7 +141,12 @@ func (c *Conn) RecvNext() (element xml.StartElement, err error) {
 
 func (c *Conn) RecvFeatures() *features {
 	var f features
-	c.decoder.DecodeElement(&f, nil)
+	err := c.decoder.Decode(&f)
+
+	if err != nil {
+		panic(err)
+	}
+
 	return &f
 }
 
@@ -173,13 +195,37 @@ func id() string {
 	return fmt.Sprintf("%x", b)
 }
 
-func (c *Conn) Available(jid string) {
+func (c *Conn) Available(from string) {
 	available := xmppPresence{
-		From:   jid,
+		Id:     id(),
+		From:   from,
 		Status: &xmppShow{Value: "chat"},
 	}
 
 	c.encoder.Encode(available)
+}
+
+func (c *Conn) Discover(from, to string) []Room {
+	discover := xmppIq{
+		Type: "get",
+		Id:   id(),
+		From: from,
+		To:   to,
+		Query: &emptyElement{
+			XMLName: xml.Name{Local: "query", Space: NsDiscover},
+		},
+	}
+
+	c.encoder.Encode(discover)
+
+	var result xmppDiscover
+	err := c.decoder.Decode(&result)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return result.Rooms
 }
 
 func (c *Conn) KeepAlive() {
@@ -192,5 +238,21 @@ func (c *Conn) ReadRaw() {
 		count, _ := c.raw.Read(buf)
 
 		fmt.Print(string(buf[:count]))
+	}
+}
+
+func (c *Conn) Join(from, nick string, rooms []Room) {
+	for _, room := range rooms {
+		join := xmppPresence{
+			Id:   id(),
+			From: from,
+			To:   room.Id + "/" + nick,
+			Status: &emptyElement{
+				XMLName: xml.Name{Local: "x", Space: NsMuc},
+			},
+		}
+		out, _ := xml.Marshal(join)
+		fmt.Println(string(out))
+		c.encoder.Encode(join)
 	}
 }

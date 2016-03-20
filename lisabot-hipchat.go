@@ -17,13 +17,15 @@ type Client struct {
 	password string
 	resource string
 	id       string
+	nick     string
 
 	// private
-	mentionNames    map[string]string
-	xmpp            *xmpp.Conn
-	receivedUsers   chan []*User
-	receivedRooms   chan []*Room
+	mentionNames  map[string]string
+	xmpp          *xmpp.Conn
+	receivedUsers chan []*User
+	// receivedRooms   chan []*Room
 	receivedMessage chan *Message
+	rooms           []xmpp.Room
 	host            string
 	jid             string
 	apiHost         string
@@ -45,15 +47,11 @@ type User struct {
 	MentionName string
 }
 
-type Room struct {
-	Id   string
-	Name string
-}
-
 func main() {
 
 	user := flag.String("user", "", "hipchat username")
 	pass := flag.String("pass", "", "hipchat password")
+	nick := flag.String("nick", "Lisa Bot", "hipchat full name")
 
 	flag.Parse()
 
@@ -70,11 +68,11 @@ func main() {
 		password: *pass,
 		resource: "bot",
 		id:       *user + "@" + hipchatHost,
+		nick:     *nick,
 
 		xmpp:            conn,
 		mentionNames:    make(map[string]string),
 		receivedUsers:   make(chan []*User),
-		receivedRooms:   make(chan []*Room),
 		receivedMessage: make(chan *Message),
 		host:            hipchatHost,
 	}
@@ -86,6 +84,10 @@ func main() {
 	}
 
 	fmt.Println("Authenticated")
+
+	c.rooms = c.xmpp.Discover(c.jid, c.mucHost)
+
+	c.xmpp.Join(c.jid, c.nick, c.rooms)
 
 	c.xmpp.Available(c.jid)
 
