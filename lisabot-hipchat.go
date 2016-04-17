@@ -12,7 +12,7 @@ const (
 	hipchatHost = "chat.hipchat.com"
 )
 
-type Client struct {
+type hipchatClient struct {
 	username string
 	password string
 	resource string
@@ -22,9 +22,9 @@ type Client struct {
 	// private
 	mentionNames  map[string]string
 	xmpp          *xmpp.Conn
-	receivedUsers chan []*User
+	receivedUsers chan []*hipchatUser
 	// receivedRooms   chan []*Room
-	receivedMessage chan *Message
+	receivedMessage chan *message
 	rooms           []xmpp.Room
 	host            string
 	jid             string
@@ -34,17 +34,23 @@ type Client struct {
 	webHost         string
 }
 
-type Message struct {
+type message struct {
 	From        string
 	To          string
 	Body        string
 	MentionName string
 }
 
-type User struct {
+type hipchatUser struct {
 	Id          string
 	Name        string
 	MentionName string
+}
+
+type xmppMessage struct {
+	Type string `xml:"type,attr"`
+	From string `xml:"from,attr"`
+	Body string `xml:"body"`
 }
 
 func main() {
@@ -52,6 +58,8 @@ func main() {
 	user := flag.String("user", "", "hipchat username")
 	pass := flag.String("pass", "", "hipchat password")
 	nick := flag.String("nick", "Lisa Bot", "hipchat full name")
+	server := flag.String("server", "127.0.0.1", "lisabot server")
+	port := flag.String("port", "4517", "lisabot server port")
 
 	flag.Parse()
 
@@ -63,7 +71,7 @@ func main() {
 	}
 	fmt.Println("Connected")
 
-	c := &Client{
+	hc := &hipchatClient{
 		username: *user,
 		password: *pass,
 		resource: "bot",
@@ -72,33 +80,39 @@ func main() {
 
 		xmpp:            conn,
 		mentionNames:    make(map[string]string),
-		receivedUsers:   make(chan []*User),
-		receivedMessage: make(chan *Message),
+		receivedUsers:   make(chan []*hipchatUser),
+		receivedMessage: make(chan *message),
 		host:            hipchatHost,
 	}
 
-	err = c.initialize()
+	err = hc.initialize()
 
 	if err != nil {
 		panic(err)
 	}
-
 	fmt.Println("Authenticated")
 
-	c.rooms = c.xmpp.Discover(c.jid, c.mucHost)
+	lisa, err := adapterConnect(*server, *port)
+	if err != nil {
+		panic(err)
+	}
+	lisa.engage()
+	fmt.Println("LisaBot connected")
 
-	c.xmpp.Join(c.jid, c.nick, c.rooms)
+	hc.rooms = hc.xmpp.Discover(hc.jid, hc.mucHost)
 
-	c.xmpp.Available(c.jid)
+	hc.xmpp.Join(hc.jid, hc.nick, hc.rooms)
+
+	hc.xmpp.Available(hc.jid)
 
 	quit := make(chan int)
-	go c.listen(quit)
-	go c.keepAlive()
+	go hc.listen(quit)
+	go hc.keepAlive()
 
 	<-quit
 }
 
-func (c *Client) initialize() error {
+func (c *hipchatClient) initialize() error {
 	c.xmpp.StreamStart(c.id, c.host)
 	for {
 		element, err := c.xmpp.RecvNext()
@@ -133,12 +147,32 @@ func (c *Client) initialize() error {
 	return nil
 }
 
-func (c *Client) keepAlive() {
+func (c *hipchatClient) keepAlive() {
 	for _ = range time.Tick(60 * time.Second) {
 		c.xmpp.KeepAlive()
 	}
 }
 
-func (c *Client) listen(quit chan int) {
-	c.xmpp.ReadRaw()
+func (c *hipchatClient) listen(quit chan int) {
+	// c.xmpp.ReadRaw()
+	for {
+		element, err := c.xmpp.RecvNext()
+
+		if err != nil {
+			continue
+		}
+
+		var message xmppMessage
+
+		switch element.Name.Local {
+		case "message":
+			c.xmpp.DecodeElement(&message, &element)
+			fmt.Println("Type: ", message.Type)
+			fmt.Println("From: ", message.From)
+			fmt.Println("Message: ", message.Body)
+		default:
+			c.xmpp.Skip()
+		}
+
+	}
 }

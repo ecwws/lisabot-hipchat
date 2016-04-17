@@ -241,6 +241,14 @@ func (c *Conn) ReadRaw() {
 	}
 }
 
+func (c *Conn) Skip() error {
+	return c.decoder.Skip()
+}
+
+func (c *Conn) DecodeElement(v interface{}, start *xml.StartElement) error {
+	return c.decoder.DecodeElement(v, start)
+}
+
 func (c *Conn) Join(from, nick string, rooms []Room) {
 	for _, room := range rooms {
 		join := xmppPresence{
