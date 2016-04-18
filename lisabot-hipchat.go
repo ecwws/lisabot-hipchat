@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/ecwws/lisabot-hipchat/xmpp"
+	"github.com/ecwws/lisabot/client"
 	"os"
 	"time"
 )
@@ -92,11 +93,11 @@ func main() {
 	}
 	fmt.Println("Authenticated")
 
-	lisa, err := adapterConnect(*server, *port)
+	lisa, err := NewLisabotClient(*server, *port)
 	if err != nil {
 		panic(err)
 	}
-	lisa.engage()
+	lisa.Engage()
 	fmt.Println("LisaBot connected")
 
 	hc.rooms = hc.xmpp.Discover(hc.jid, hc.mucHost)
