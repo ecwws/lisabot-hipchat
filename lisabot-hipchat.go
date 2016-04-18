@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/ecwws/lisabot-hipchat/xmpp"
-	"github.com/ecwws/lisabot/client"
+	"github.com/ecwws/lisabot/lisaclient"
 	"os"
 	"time"
 )
@@ -93,7 +93,7 @@ func main() {
 	}
 	fmt.Println("Authenticated")
 
-	lisa, err := NewLisabotClient(*server, *port)
+	lisa, err := lisaclient.NewClient(*server, *port)
 	if err != nil {
 		panic(err)
 	}
