@@ -95,22 +95,28 @@ func main() {
 
 	lisa, err := lisaclient.NewClient(*server, *port)
 	if err != nil {
-		panic(err)
+		fmt.Println("Failed to create lisabot-hipchate:", err)
 	}
-	lisa.Engage()
-	fmt.Println("LisaBot connected")
+
+	err = lisa.Engage()
+
+	if err != nil {
+		fmt.Println("Failed to engage:", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("LisaBot engaged")
+
+	// quit := make(chan int)
 
 	hc.rooms = hc.xmpp.Discover(hc.jid, hc.mucHost)
-
 	hc.xmpp.Join(hc.jid, hc.nick, hc.rooms)
-
 	hc.xmpp.Available(hc.jid)
 
-	quit := make(chan int)
-	go hc.listen(quit)
-	go hc.keepAlive()
+	run(lisa, hc)
+	// go hc.keepAlive()
 
-	<-quit
+	// <-quit
 }
 
 func (c *hipchatClient) initialize() error {
@@ -154,7 +160,27 @@ func (c *hipchatClient) keepAlive() {
 	}
 }
 
-func (c *hipchatClient) listen(quit chan int) {
+func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
+	fromHC := make(chan *xmppMessage)
+	go hc.listen(fromHC)
+
+	fromLisa := make(chan *lisaclient.Query)
+	toLisa := make(chan *lisaclient.Query)
+	go lisa.Run(toLisa, fromLisa)
+
+	for {
+		select {
+		case msg := <-fromHC:
+			fmt.Println("Type:", msg.Type)
+			fmt.Println("From:", msg.From)
+			fmt.Println("Message:", msg.Body)
+		case query := <-fromLisa:
+			fmt.Println("Query type:", query.Type)
+		}
+	}
+}
+
+func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
 	// c.xmpp.ReadRaw()
 	for {
 		element, err := c.xmpp.RecvNext()
@@ -163,14 +189,12 @@ func (c *hipchatClient) listen(quit chan int) {
 			continue
 		}
 
-		var message xmppMessage
+		message := new(xmppMessage)
 
 		switch element.Name.Local {
 		case "message":
-			c.xmpp.DecodeElement(&message, &element)
-			fmt.Println("Type: ", message.Type)
-			fmt.Println("From: ", message.From)
-			fmt.Println("Message: ", message.Body)
+			c.xmpp.DecodeElement(message, &element)
+			msgChan <- message
 		default:
 			c.xmpp.Skip()
 		}
