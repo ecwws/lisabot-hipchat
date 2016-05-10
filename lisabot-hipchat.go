@@ -170,9 +170,9 @@ func (c *hipchatClient) initialize() error {
 	return nil
 }
 
-func (c *hipchatClient) keepAlive() {
+func (c *hipchatClient) keepAlive(trigger chan<- bool) {
 	for _ = range time.Tick(60 * time.Second) {
-		c.xmpp.KeepAlive()
+		trigger <- true
 	}
 }
 
@@ -184,6 +184,9 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 	toLisa := make(chan *lisaclient.Query)
 	go lisa.Run(toLisa, fromLisa)
 
+	keepAlive := make(chan bool)
+	go hc.keepAlive(keepAlive)
+
 	for {
 		select {
 		case msg := <-fromHC:
@@ -192,6 +195,9 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 			logger.Debug.Println("Message:", msg.Body)
 		case query := <-fromLisa:
 			logger.Debug.Println("Query type:", query.Type)
+		case <-keepAlive:
+			hc.xmpp.KeepAlive()
+			logger.Debug.Println("KeepAlive sent")
 		}
 	}
 }
