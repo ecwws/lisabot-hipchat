@@ -1,4 +1,4 @@
-package xmpp
+package main
 
 import (
 	"crypto/rand"
@@ -12,11 +12,11 @@ import (
 )
 
 const (
-	NsStream   = "http://etherx.jabber.org/streams"
-	NsTLS      = "urn:ietf:params:xml:ns:xmpp-tls"
-	NsHipchat  = "http://hipchat.com"
-	NsDiscover = "http://jabber.org/protocol/disco#items"
-	NsMuc      = "http://jabber.org/protocol/muc"
+	xmppNsStream   = "http://etherx.jabber.org/streams"
+	xmppNsTLS      = "urn:ietf:params:xml:ns:xmpp-tls"
+	xmppNsHipchat  = "http://hipchat.com"
+	xmppNsDiscover = "http://jabber.org/protocol/disco#items"
+	xmppNsMuc      = "http://jabber.org/protocol/muc"
 
 	streamStart = `<stream:stream
 		xmlns='jabber:client'
@@ -27,7 +27,7 @@ const (
 	streamEnd = "</stream:stream>"
 )
 
-type Conn struct {
+type xmppConn struct {
 	raw     net.Conn
 	decoder *xml.Decoder
 	encoder *xml.Encoder
@@ -98,8 +98,8 @@ type xmppDiscover struct {
 	Rooms   []Room   `xml:"query>item"`
 }
 
-func Connect(host string) (*Conn, error) {
-	c := new(Conn)
+func xmppConnect(host string) (*xmppConn, error) {
+	c := new(xmppConn)
 
 	conn, err := net.Dial("tcp", host+":5222")
 
@@ -114,11 +114,11 @@ func Connect(host string) (*Conn, error) {
 	return c, nil
 }
 
-func (c *Conn) StreamStart(id, host string) {
+func (c *xmppConn) StreamStart(id, host string) {
 	fmt.Fprintf(c.raw, streamStart, id, host)
 }
 
-func (c *Conn) RecvNext() (element xml.StartElement, err error) {
+func (c *xmppConn) RecvNext() (element xml.StartElement, err error) {
 	for {
 		var t xml.Token
 		t, err = c.decoder.Token()
@@ -139,7 +139,7 @@ func (c *Conn) RecvNext() (element xml.StartElement, err error) {
 	}
 }
 
-func (c *Conn) RecvFeatures() *features {
+func (c *xmppConn) RecvFeatures() *features {
 	var f features
 	err := c.decoder.Decode(&f)
 
@@ -150,20 +150,20 @@ func (c *Conn) RecvFeatures() *features {
 	return &f
 }
 
-func (c *Conn) StartTLS() {
+func (c *xmppConn) StartTLS() {
 	starttls := emptyElement{
-		XMLName: xml.Name{Local: "starttls", Space: NsTLS},
+		XMLName: xml.Name{Local: "starttls", Space: xmppNsTLS},
 	}
 	c.encoder.Encode(starttls)
 }
 
-func (c *Conn) UseTLS(host string) {
+func (c *xmppConn) UseTLS(host string) {
 	c.raw = tls.Client(c.raw, &tls.Config{ServerName: host})
 	c.decoder = xml.NewDecoder(c.raw)
 	c.encoder = xml.NewEncoder(c.raw)
 }
 
-func (c *Conn) Auth(username, password, resource string) (*authResponse, error) {
+func (c *xmppConn) Auth(username, password, resource string) (*authResponse, error) {
 	token := []byte{'\x00'}
 
 	token = append(token, []byte(username)...)
@@ -175,7 +175,7 @@ func (c *Conn) Auth(username, password, resource string) (*authResponse, error) 
 	encodedToken := base64.StdEncoding.EncodeToString(token)
 
 	auth := xmppAuth{
-		Ns:    NsHipchat,
+		Ns:    xmppNsHipchat,
 		Value: encodedToken,
 	}
 	// out, _ := xml.Marshal(auth)
@@ -195,7 +195,7 @@ func id() string {
 	return fmt.Sprintf("%x", b)
 }
 
-func (c *Conn) Available(from string) {
+func (c *xmppConn) Available(from string) {
 	available := xmppPresence{
 		Id:     id(),
 		From:   from,
@@ -205,14 +205,14 @@ func (c *Conn) Available(from string) {
 	c.encoder.Encode(available)
 }
 
-func (c *Conn) Discover(from, to string) []Room {
+func (c *xmppConn) Discover(from, to string) []Room {
 	discover := xmppIq{
 		Type: "get",
 		Id:   id(),
 		From: from,
 		To:   to,
 		Query: &emptyElement{
-			XMLName: xml.Name{Local: "query", Space: NsDiscover},
+			XMLName: xml.Name{Local: "query", Space: xmppNsDiscover},
 		},
 	}
 
@@ -228,39 +228,39 @@ func (c *Conn) Discover(from, to string) []Room {
 	return result.Rooms
 }
 
-func (c *Conn) KeepAlive() {
+func (c *xmppConn) KeepAlive() {
 	fmt.Fprintf(c.raw, " ")
 }
 
-func (c *Conn) ReadRaw() {
+func (c *xmppConn) ReadRaw() {
 	for {
 		buf := make([]byte, 128)
 		count, _ := c.raw.Read(buf)
 
-		fmt.Print(string(buf[:count]))
+		logger.Debug.Print(string(buf[:count]))
 	}
 }
 
-func (c *Conn) Skip() error {
+func (c *xmppConn) Skip() error {
 	return c.decoder.Skip()
 }
 
-func (c *Conn) DecodeElement(v interface{}, start *xml.StartElement) error {
+func (c *xmppConn) DecodeElement(v interface{}, start *xml.StartElement) error {
 	return c.decoder.DecodeElement(v, start)
 }
 
-func (c *Conn) Join(from, nick string, rooms []Room) {
+func (c *xmppConn) Join(from, nick string, rooms []Room) {
 	for _, room := range rooms {
 		join := xmppPresence{
 			Id:   id(),
 			From: from,
 			To:   room.Id + "/" + nick,
 			Status: &emptyElement{
-				XMLName: xml.Name{Local: "x", Space: NsMuc},
+				XMLName: xml.Name{Local: "x", Space: xmppNsMuc},
 			},
 		}
 		out, _ := xml.Marshal(join)
-		fmt.Println(string(out))
+		logger.Debug.Println("Request to join room:", string(out))
 		c.encoder.Encode(join)
 	}
 }

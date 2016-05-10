@@ -3,8 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/ecwws/lisabot-hipchat/xmpp"
 	"github.com/ecwws/lisabot/lisaclient"
+	"github.com/ecwws/lisabot/logging"
 	"os"
 	"time"
 )
@@ -22,11 +22,11 @@ type hipchatClient struct {
 
 	// private
 	mentionNames  map[string]string
-	xmpp          *xmpp.Conn
+	xmpp          *xmppConn
 	receivedUsers chan []*hipchatUser
 	// receivedRooms   chan []*Room
 	receivedMessage chan *message
-	rooms           []xmpp.Room
+	rooms           []Room
 	host            string
 	jid             string
 	apiHost         string
@@ -54,6 +54,8 @@ type xmppMessage struct {
 	Body string `xml:"body"`
 }
 
+var logger *logging.LisaLog
+
 func main() {
 
 	user := flag.String("user", "", "hipchat username")
@@ -61,16 +63,28 @@ func main() {
 	nick := flag.String("nick", "Lisa Bot", "hipchat full name")
 	server := flag.String("server", "127.0.0.1", "lisabot server")
 	port := flag.String("port", "4517", "lisabot server port")
+	sourceid := flag.String("id", "lisabot-hipchat", "source id")
+	loglevel := flag.String("loglevel", "warn", "loglevel")
 
 	flag.Parse()
 
-	conn, err := xmpp.Connect(hipchatHost)
+	var err error
+
+	logger, err = logging.NewLogger(os.Stdout, *loglevel)
 
 	if err != nil {
-		fmt.Println("Error: ", err.Error())
+		fmt.Println("Error initializing logger: ", err)
+		os.Exit(-1)
+	}
+
+	conn, err := xmppConnect(hipchatHost)
+
+	if err != nil {
+		logger.Error.Println("Error connecting to lisabot:", err)
 		os.Exit(1)
 	}
-	fmt.Println("Connected")
+
+	logger.Info.Println("Connected")
 
 	hc := &hipchatClient{
 		username: *user,
@@ -91,21 +105,23 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Authenticated")
+	logger.Info.Println("Authenticated")
 
 	lisa, err := lisaclient.NewClient(*server, *port)
-	if err != nil {
-		fmt.Println("Failed to create lisabot-hipchate:", err)
-	}
-
-	err = lisa.Engage()
 
 	if err != nil {
-		fmt.Println("Failed to engage:", err)
-		os.Exit(1)
+		logger.Error.Println("Failed to create lisabot-hipchate:", err)
+		os.Exit(2)
 	}
 
-	fmt.Println("LisaBot engaged")
+	err = lisa.Engage("adapter", *sourceid)
+
+	if err != nil {
+		logger.Error.Println("Failed to engage:", err)
+		os.Exit(3)
+	}
+
+	logger.Info.Println("LisaBot engaged")
 
 	// quit := make(chan int)
 
@@ -129,7 +145,7 @@ func (c *hipchatClient) initialize() error {
 		}
 
 		switch element.Name.Local + element.Name.Space {
-		case "stream" + xmpp.NsStream:
+		case "stream" + xmppNsStream:
 			features := c.xmpp.RecvFeatures()
 			if features.StartTLS != nil {
 				c.xmpp.StartTLS()
@@ -145,7 +161,7 @@ func (c *hipchatClient) initialize() error {
 				c.webHost = info.WebHost
 				return nil
 			}
-		case "proceed" + xmpp.NsTLS:
+		case "proceed" + xmppNsTLS:
 			c.xmpp.UseTLS(c.host)
 			c.xmpp.StreamStart(c.id, c.host)
 		}
@@ -171,11 +187,11 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 	for {
 		select {
 		case msg := <-fromHC:
-			fmt.Println("Type:", msg.Type)
-			fmt.Println("From:", msg.From)
-			fmt.Println("Message:", msg.Body)
+			logger.Debug.Println("Type:", msg.Type)
+			logger.Debug.Println("From:", msg.From)
+			logger.Debug.Println("Message:", msg.Body)
 		case query := <-fromLisa:
-			fmt.Println("Query type:", query.Type)
+			logger.Debug.Println("Query type:", query.Type)
 		}
 	}
 }
