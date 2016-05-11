@@ -28,9 +28,10 @@ const (
 )
 
 type xmppConn struct {
-	raw     net.Conn
-	decoder *xml.Decoder
-	encoder *xml.Encoder
+	raw      net.Conn
+	rawDebug io.Reader
+	decoder  *xml.Decoder
+	encoder  *xml.Encoder
 }
 
 type emptyElement struct {
@@ -232,12 +233,32 @@ func (c *xmppConn) KeepAlive() {
 	fmt.Fprintf(c.raw, " ")
 }
 
-func (c *xmppConn) ReadRaw() {
-	for {
-		buf := make([]byte, 128)
-		count, _ := c.raw.Read(buf)
+func (c *xmppConn) Debug() {
+	debugReader, debugWriter := io.Pipe()
+	streamIn := io.TeeReader(c.raw, debugWriter)
 
-		logger.Debug.Print(string(buf[:count]))
+	c.rawDebug = debugReader
+	c.decoder = xml.NewDecoder(streamIn)
+
+	go c.DebugRaw()
+}
+
+func (c *xmppConn) DebugRaw() {
+	if c.rawDebug != nil {
+		for {
+			buf := make([]byte, 2048)
+			count, err := c.rawDebug.Read(buf)
+
+			if err == nil {
+				logger.Debug.Println("Raw:", string(buf[:count]))
+			} else {
+				logger.Error.Println("Raw error:", err)
+				if err.Error() == "EOF" {
+					logger.Warn.Println("EOF detected")
+					break
+				}
+			}
+		}
 	}
 }
 

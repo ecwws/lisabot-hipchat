@@ -193,6 +193,16 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 			logger.Debug.Println("Type:", msg.Type)
 			logger.Debug.Println("From:", msg.From)
 			logger.Debug.Println("Message:", msg.Body)
+			if msg.Body != "" {
+				toLisa <- &lisaclient.Query{
+					Type:   "message",
+					Source: lisa.SourceId,
+					Message: &lisaclient.MessageBlock{
+						Message: msg.Body,
+						From:    msg.From,
+					},
+				}
+			}
 		case query := <-fromLisa:
 			logger.Debug.Println("Query type:", query.Type)
 		case <-keepAlive:
@@ -204,6 +214,9 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 
 func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
 	// c.xmpp.ReadRaw()
+	if logger.Level == "debug" {
+		c.xmpp.Debug()
+	}
 	for {
 		element, err := c.xmpp.RecvNext()
 
