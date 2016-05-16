@@ -6,11 +6,13 @@ import (
 	"github.com/ecwws/lisabot/lisaclient"
 	"github.com/ecwws/lisabot/logging"
 	"os"
+	"strings"
 	"time"
 )
 
 const (
 	hipchatHost = "chat.hipchat.com"
+	hipchatConf = "conf.hipchat.com"
 )
 
 type hipchatClient struct {
@@ -29,6 +31,7 @@ type hipchatClient struct {
 	rooms           []Room
 	host            string
 	jid             string
+	local_id        string
 	apiHost         string
 	chatHost        string
 	mucHost         string
@@ -49,9 +52,11 @@ type hipchatUser struct {
 }
 
 type xmppMessage struct {
-	Type string `xml:"type,attr"`
-	From string `xml:"from,attr"`
-	Body string `xml:"body"`
+	Type     string `xml:"type,attr"`
+	From     string `xml:"from,attr"`
+	Body     string `xml:"body"`
+	RoomName string `xml:"x>name"`
+	RoomId   string `xml:"x>id"`
 }
 
 var logger *logging.LisaLog
@@ -155,10 +160,12 @@ func (c *hipchatClient) initialize() error {
 					return err
 				}
 				c.jid = info.Jid
+				c.local_id = strings.Split(c.jid, "_")[0]
 				c.apiHost = info.ApiHost
 				c.chatHost = info.ChatHost
 				c.mucHost = info.MucHost
 				c.webHost = info.WebHost
+				logger.Debug.Println("JID:", c.jid)
 				return nil
 			}
 		case "proceed" + xmppNsTLS:
@@ -177,8 +184,8 @@ func (c *hipchatClient) keepAlive(trigger chan<- bool) {
 }
 
 func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
-	fromHC := make(chan *xmppMessage)
-	go hc.listen(fromHC)
+	messageFromHC := make(chan *xmppMessage)
+	go hc.listen(messageFromHC)
 
 	fromLisa := make(chan *lisaclient.Query)
 	toLisa := make(chan *lisaclient.Query)
@@ -189,7 +196,7 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 
 	for {
 		select {
-		case msg := <-fromHC:
+		case msg := <-messageFromHC:
 			logger.Debug.Println("Type:", msg.Type)
 			logger.Debug.Println("From:", msg.From)
 			logger.Debug.Println("Message:", msg.Body)
@@ -202,6 +209,12 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 						From:    msg.From,
 					},
 				}
+			} else if msg.RoomName != "" {
+				hc.xmpp.Join(hc.jid, hc.nick, []Room{
+					Room{
+						Id: hc.local_id + "_" + msg.RoomName + "@" + hipchatConf,
+					},
+				})
 			}
 		case query := <-fromLisa:
 			logger.Debug.Println("Query type:", query.Type)
@@ -213,7 +226,7 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 }
 
 func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
-	// c.xmpp.ReadRaw()
+
 	if logger.Level == "debug" {
 		c.xmpp.Debug()
 	}
@@ -224,12 +237,13 @@ func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
 			continue
 		}
 
-		message := new(xmppMessage)
-
 		switch element.Name.Local {
 		case "message":
+			message := new(xmppMessage)
 			c.xmpp.DecodeElement(message, &element)
 			msgChan <- message
+
+			logger.Debug.Println(*message)
 		default:
 			c.xmpp.Skip()
 		}

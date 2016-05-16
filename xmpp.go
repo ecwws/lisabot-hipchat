@@ -270,6 +270,10 @@ func (c *xmppConn) DecodeElement(v interface{}, start *xml.StartElement) error {
 	return c.decoder.DecodeElement(v, start)
 }
 
+func (c *xmppConn) Decode(v interface{}) error {
+	return c.decoder.Decode(v)
+}
+
 func (c *xmppConn) Join(from, nick string, rooms []Room) {
 	for _, room := range rooms {
 		join := xmppPresence{
