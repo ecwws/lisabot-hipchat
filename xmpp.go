@@ -1,12 +1,12 @@
 package main
 
 import (
-	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/ecwws/lisabot/lisaclient"
 	"io"
 	"net"
 )
@@ -190,15 +190,9 @@ func (c *xmppConn) Auth(username, password, resource string) (*authResponse, err
 	return &response, err
 }
 
-func id() string {
-	b := make([]byte, 8)
-	io.ReadFull(rand.Reader, b)
-	return fmt.Sprintf("%x", b)
-}
-
 func (c *xmppConn) Available(from string) {
 	available := xmppPresence{
-		Id:     id(),
+		Id:     lisaclient.RandomId(),
 		From:   from,
 		Status: &xmppShow{Value: "chat"},
 	}
@@ -209,7 +203,7 @@ func (c *xmppConn) Available(from string) {
 func (c *xmppConn) Discover(from, to string) []Room {
 	discover := xmppIq{
 		Type: "get",
-		Id:   id(),
+		Id:   lisaclient.RandomId(),
 		From: from,
 		To:   to,
 		Query: &emptyElement{
@@ -223,7 +217,7 @@ func (c *xmppConn) Discover(from, to string) []Room {
 	err := c.decoder.Decode(&result)
 
 	if err != nil {
-		panic(err)
+		logger.Error.Println(err)
 	}
 
 	return result.Rooms
@@ -274,12 +268,12 @@ func (c *xmppConn) Decode(v interface{}) error {
 	return c.decoder.Decode(v)
 }
 
-func (c *xmppConn) Join(from, nick string, rooms []Room) {
+func (c *xmppConn) Join(from, nick string, rooms []string) {
 	for _, room := range rooms {
 		join := xmppPresence{
-			Id:   id(),
+			Id:   lisaclient.RandomId(),
 			From: from,
-			To:   room.Id + "/" + nick,
+			To:   room + "/" + nick,
 			Status: &emptyElement{
 				XMLName: xml.Name{Local: "x", Space: xmppNsMuc},
 			},
@@ -288,4 +282,10 @@ func (c *xmppConn) Join(from, nick string, rooms []Room) {
 		logger.Debug.Println("Request to join room:", string(out))
 		c.encoder.Encode(join)
 	}
+}
+
+func (c *xmppConn) Encode(v interface{}) error {
+	out, _ := xml.Marshal(v)
+	logger.Debug.Println("Request encoded:", string(out))
+	return c.encoder.Encode(v)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"github.com/ecwws/lisabot/lisaclient"
@@ -28,10 +29,11 @@ type hipchatClient struct {
 	receivedUsers chan []*hipchatUser
 	// receivedRooms   chan []*Room
 	receivedMessage chan *message
-	rooms           []Room
+	roomsByName     map[string]string
+	roomsById       map[string]string
 	host            string
 	jid             string
-	local_id        string
+	accountId       string
 	apiHost         string
 	chatHost        string
 	mucHost         string
@@ -52,11 +54,14 @@ type hipchatUser struct {
 }
 
 type xmppMessage struct {
-	Type     string `xml:"type,attr"`
-	From     string `xml:"from,attr"`
-	Body     string `xml:"body"`
-	RoomName string `xml:"x>name"`
-	RoomId   string `xml:"x>id"`
+	XMLName  xml.Name `xml:"message"`
+	Type     string   `xml:"type,attr"`
+	From     string   `xml:"from,attr"`
+	To       string   `xml:"to,attr"`
+	Id       string   `xml:"id,attr"`
+	Body     string   `xml:"body"`
+	RoomName string   `xml:"x>name,omitempty"`
+	RoomId   string   `xml:"x>id,omitempty"`
 }
 
 var logger *logging.LisaLog
@@ -112,7 +117,7 @@ func main() {
 	}
 	logger.Info.Println("Authenticated")
 
-	lisa, err := lisaclient.NewClient(*server, *port)
+	lisa, err := lisaclient.NewClient(*server, *port, logger)
 
 	if err != nil {
 		logger.Error.Println("Failed to create lisabot-hipchate:", err)
@@ -130,8 +135,25 @@ func main() {
 
 	// quit := make(chan int)
 
-	hc.rooms = hc.xmpp.Discover(hc.jid, hc.mucHost)
-	hc.xmpp.Join(hc.jid, hc.nick, hc.rooms)
+	if logger.Level == "debug" {
+		hc.xmpp.Debug()
+	}
+
+	rooms := hc.xmpp.Discover(hc.jid, hc.mucHost)
+
+	hc.roomsByName = make(map[string]string)
+	hc.roomsById = make(map[string]string)
+
+	autojoin := make([]string, 0, len(rooms))
+
+	for _, room := range rooms {
+		hc.roomsByName[room.Name] = room.Id
+		hc.roomsById[room.Id] = room.Name
+		autojoin = append(autojoin, room.Id)
+	}
+
+	hc.xmpp.Join(hc.jid, hc.nick, autojoin)
+
 	hc.xmpp.Available(hc.jid)
 
 	run(lisa, hc)
@@ -160,7 +182,7 @@ func (c *hipchatClient) initialize() error {
 					return err
 				}
 				c.jid = info.Jid
-				c.local_id = strings.Split(c.jid, "_")[0]
+				c.accountId = strings.Split(c.jid, "_")[0]
 				c.apiHost = info.ApiHost
 				c.chatHost = info.ChatHost
 				c.mucHost = info.MucHost
@@ -194,30 +216,48 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 	keepAlive := make(chan bool)
 	go hc.keepAlive(keepAlive)
 
+mainLoop:
 	for {
 		select {
 		case msg := <-messageFromHC:
 			logger.Debug.Println("Type:", msg.Type)
 			logger.Debug.Println("From:", msg.From)
 			logger.Debug.Println("Message:", msg.Body)
-			if msg.Body != "" {
+			logger.Debug.Println("Room Invite:", msg.RoomName)
+
+			fromSplit := strings.Split(msg.From, "/")
+			fromRoom := fromSplit[0]
+			var fromNick string
+			if len(fromSplit) > 1 {
+				fromNick = fromSplit[1]
+			}
+			if msg.Body != "" && fromNick != hc.nick {
 				toLisa <- &lisaclient.Query{
 					Type:   "message",
 					Source: lisa.SourceId,
 					Message: &lisaclient.MessageBlock{
 						Message: msg.Body,
-						From:    msg.From,
+						From:    fromNick,
+						Room:    hc.roomsById[fromRoom],
 					},
 				}
 			} else if msg.RoomName != "" {
-				hc.xmpp.Join(hc.jid, hc.nick, []Room{
-					Room{
-						Id: hc.local_id + "_" + msg.RoomName + "@" + hipchatConf,
-					},
-				})
+				hc.roomsByName[msg.RoomName] = msg.From
+				hc.roomsById[msg.From] = msg.RoomName
+				hc.xmpp.Join(hc.jid, hc.nick, []string{msg.From})
 			}
 		case query := <-fromLisa:
 			logger.Debug.Println("Query type:", query.Type)
+			switch {
+			case query.Type == "command" &&
+				query.Command.Action == "disengage":
+				// either server forcing disengage or server connection lost
+				logger.Warn.Println("Disengage received, terminating...")
+				break mainLoop
+			case query.Type == "message":
+				hc.groupMessage(hc.roomsById[query.Message.Room],
+					query.Message.Message)
+			}
 		case <-keepAlive:
 			hc.xmpp.KeepAlive()
 			logger.Debug.Println("KeepAlive sent")
@@ -225,11 +265,18 @@ func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
 	}
 }
 
+func (c *hipchatClient) groupMessage(room, message string) error {
+	return c.xmpp.Encode(&xmppMessage{
+		From: c.jid,
+		To:   room + "/" + c.nick,
+		Id:   lisaclient.RandomId(),
+		Type: "groupchat",
+		Body: message,
+	})
+}
+
 func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
 
-	if logger.Level == "debug" {
-		c.xmpp.Debug()
-	}
 	for {
 		element, err := c.xmpp.RecvNext()
 
