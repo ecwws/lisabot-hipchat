@@ -247,7 +247,7 @@ mainLoop:
 				hc.xmpp.Join(hc.jid, hc.nick, []string{msg.From})
 			}
 		case query := <-fromLisa:
-			logger.Debug.Println("Query type:", query.Type)
+			logger.Debug.Println("Query received:", *query)
 			switch {
 			case query.Type == "command" &&
 				query.Command.Action == "disengage":
@@ -255,7 +255,7 @@ mainLoop:
 				logger.Warn.Println("Disengage received, terminating...")
 				break mainLoop
 			case query.Type == "message":
-				hc.groupMessage(hc.roomsById[query.Message.Room],
+				hc.groupMessage(hc.roomsByName[query.Message.Room],
 					query.Message.Message)
 			}
 		case <-keepAlive:
