@@ -258,7 +258,8 @@ mainLoop:
 				if err != nil {
 					logger.Error.Println("Error searching for mention:", err)
 				}
-				toLisa <- &lisaclient.Query{
+
+				clientQuery := lisaclient.Query{
 					Type:   "message",
 					Source: lisa.SourceId,
 					To:     "server",
@@ -269,6 +270,13 @@ mainLoop:
 						Mentioned: mentioned,
 					},
 				}
+
+				if mentioned {
+					clientQuery.Message.Message = strings.Replace(msg.Body,
+						"@"+hc.mention, "", -1)
+				}
+
+				toLisa <- &clientQuery
 			} else if msg.RoomName != "" {
 				hc.roomsByName[msg.RoomName] = msg.From
 				hc.roomsById[msg.From] = msg.RoomName
