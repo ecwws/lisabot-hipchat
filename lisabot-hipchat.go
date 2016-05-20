@@ -7,6 +7,7 @@ import (
 	"github.com/ecwws/lisabot/lisaclient"
 	"github.com/ecwws/lisabot/logging"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -253,13 +254,19 @@ mainLoop:
 			}
 
 			if msg.Body != "" && fromNick != hc.nick {
+				mentioned, err := regexp.MatchString("@"+hc.mention, msg.Body)
+				if err != nil {
+					logger.Error.Println("Error searching for mention:", err)
+				}
 				toLisa <- &lisaclient.Query{
 					Type:   "message",
 					Source: lisa.SourceId,
+					To:     "server",
 					Message: &lisaclient.MessageBlock{
-						Message: msg.Body,
-						From:    fromNick,
-						Room:    hc.roomsById[fromRoom],
+						Message:   msg.Body,
+						From:      fromNick,
+						Room:      hc.roomsById[fromRoom],
+						Mentioned: mentioned,
 					},
 				}
 			} else if msg.RoomName != "" {
