@@ -67,7 +67,7 @@ type xmppIq struct {
 	Type    string   `xml:"type,attr"`
 	Id      string   `xml:"id,attr"`
 	From    string   `xml:"from,attr,omitempty"`
-	To      string   `xml:"to,attr"`
+	To      string   `xml:"to,attr,omitempty"`
 	Query   interface{}
 }
 
@@ -100,6 +100,19 @@ type Room struct {
 type xmppDiscover struct {
 	XMLName xml.Name `xml:"iq"`
 	Rooms   []Room   `xml:"query>item"`
+}
+
+type xmppVCard struct {
+	XMLName xml.Name `xml:"vCard"`
+	Ns      string   `xml:"xmlns,attr"`
+}
+
+type hipchatUser struct {
+	XMLName xml.Name `xml:"iq"`
+	Jid     string   `xml:"from,attr"`
+	Name    string   `xml:"vCard>FN"`
+	Mention string   `xml:"vCard>NICKNAME"`
+	Email   string   `xml:"vCard>EMAIL>USERID"`
 }
 
 func xmppConnect(host string) (*xmppConn, error) {
@@ -308,4 +321,35 @@ func (c *xmppConn) Encode(v interface{}) error {
 	out, _ := xml.Marshal(v)
 	logger.Debug.Println("Request encoded:", string(out))
 	return c.encoder.Encode(v)
+}
+
+func (c *xmppConn) VCardRequest(jid, name string) error {
+	request := &xmppIq{
+		From: jid,
+		Id:   lisaclient.RandomId(),
+		Type: "get",
+		Query: &xmppVCard{
+			Ns: "vcard-temp",
+		},
+	}
+
+	if name != "" {
+		request.To = name
+	}
+
+	out, _ := xml.Marshal(request)
+	logger.Debug.Println("Request vCard:", string(out))
+	return c.encoder.Encode(request)
+}
+
+func (c *xmppConn) VCardDecode(start *xml.StartElement) (*hipchatUser, error) {
+	user := new(hipchatUser)
+
+	if start == nil {
+		err := c.decoder.Decode(user)
+		return user, err
+	}
+
+	err := c.DecodeElement(user, start)
+	return user, err
 }

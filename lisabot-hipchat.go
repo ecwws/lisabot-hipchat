@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/ecwws/lisabot/lisaclient"
 	"github.com/ecwws/lisabot/logging"
-	"github.com/tbruyelle/hipchat-go/hipchat"
 	"os"
 	"strings"
 	"time"
@@ -25,10 +24,10 @@ type hipchatClient struct {
 	nick     string
 
 	// private
-	usersByMention  map[string]*hipchat.User
-	usersById       map[int]*hipchat.User
-	usersByName     map[string]*hipchat.User
-	usersByJid      map[string]*hipchat.User
+	usersByMention  map[string]*hipchatUser
+	usersByName     map[string]*hipchatUser
+	usersByJid      map[string]*hipchatUser
+	usersByEmail    map[string]*hipchatUser
 	xmpp            *xmppConn
 	receivedMessage chan *message
 	roomsByName     map[string]string
@@ -41,10 +40,7 @@ type hipchatClient struct {
 	mucHost         string
 	webHost         string
 	token           string
-	// tokenExp        int64
-	mention   string
-	api       *hipchat.Client
-	hipchatId int
+	mention         string
 }
 
 type message struct {
@@ -58,6 +54,7 @@ type xmppMessage struct {
 	XMLName  xml.Name `xml:"message"`
 	Type     string   `xml:"type,attr"`
 	From     string   `xml:"from,attr"`
+	FromJid  string   `xml:"from_jid,attr"`
 	To       string   `xml:"to,attr"`
 	Id       string   `xml:"id,attr"`
 	Body     string   `xml:"body"`
@@ -105,10 +102,10 @@ func main() {
 		nick:     *nick,
 
 		xmpp:            conn,
-		usersByMention:  make(map[string]*hipchat.User),
-		usersById:       make(map[int]*hipchat.User),
-		usersByJid:      make(map[string]*hipchat.User),
-		usersByName:     make(map[string]*hipchat.User),
+		usersByMention:  make(map[string]*hipchatUser),
+		usersByJid:      make(map[string]*hipchatUser),
+		usersByName:     make(map[string]*hipchatUser),
+		usersByEmail:    make(map[string]*hipchatUser),
 		receivedMessage: make(chan *message),
 		host:            hipchatHost,
 		roomsByName:     make(map[string]string),
@@ -118,9 +115,22 @@ func main() {
 	err = hc.initialize()
 
 	if err != nil {
-		panic(err)
+		logger.Error.Fatal("Failed to initialize:", err)
 	}
 	logger.Info.Println("Authenticated")
+
+	hc.xmpp.VCardRequest(hc.jid, "")
+	self, err := hc.xmpp.VCardDecode(nil)
+
+	if err != nil {
+		logger.Error.Fatal("Failed to retrieve info on myself:", err)
+	}
+
+	hc.mention = self.Mention
+
+	self.Jid = hc.jid
+
+	hc.updateUserInfo(self)
 
 	lisa, err := lisaclient.NewClient(*server, *port, logger)
 
@@ -149,17 +159,6 @@ func main() {
 		hc.roomsById[room.Id] = room.Name
 		autojoin = append(autojoin, room.Id)
 	}
-
-	hc.api = hipchat.NewClient(hc.token)
-
-	logger.Debug.Println("hc api:", hc.api)
-
-	if err := hc.userLookUp(*user); err != nil {
-		logger.Error.Fatal("Unable to lookup info on myself:", err)
-	}
-
-	hc.mention = hc.usersByName[hc.nick].MentionName
-	hc.hipchatId = hc.usersByName[hc.nick].ID
 
 	hc.xmpp.Join(hc.jid, hc.nick, autojoin)
 
@@ -246,6 +245,13 @@ mainLoop:
 			if len(fromSplit) > 1 {
 				fromNick = fromSplit[1]
 			}
+
+			if msg.FromJid != "" {
+				if _, exist := hc.usersByJid[msg.FromJid]; !exist {
+					hc.xmpp.VCardRequest(hc.jid, msg.FromJid)
+				}
+			}
+
 			if msg.Body != "" && fromNick != hc.nick {
 				toLisa <- &lisaclient.Query{
 					Type:   "message",
@@ -278,10 +284,10 @@ mainLoop:
 			logger.Debug.Println("KeepAlive sent")
 			// within 60 seconds of token expiration
 			// if hc.tokenExp < time.Now().Unix()+60 {
-			if true {
-				hc.xmpp.AuthRequest(hc.username, hc.password, hc.resource)
-				logger.Info.Println("New token requested")
-			}
+			// if true {
+			//  hc.xmpp.AuthRequest(hc.username, hc.password, hc.resource)
+			//  logger.Info.Println("New token requested")
+			// }
 		}
 	}
 }
@@ -312,6 +318,13 @@ func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
 			msgChan <- message
 
 			logger.Debug.Println(*message)
+		case "iq":
+			userInfo, err := c.xmpp.VCardDecode(&element)
+			if err == nil {
+				c.updateUserInfo(userInfo)
+			} else {
+				logger.Error.Println("Error decoding user vCard:", err)
+			}
 		// case "success":
 		//  var auth authResponse
 		//  c.xmpp.AuthResp(&auth, &element)
@@ -327,19 +340,11 @@ func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
 	}
 }
 
-func (c *hipchatClient) userLookUp(name string) error {
-	info, _, err := c.api.User.View(name)
-
-	if err != nil {
-		return err
-	}
-
-	logger.Debug.Println("User found:", info)
-
-	c.usersByMention[info.MentionName] = info
-	c.usersById[info.ID] = info
-	c.usersByJid[info.XmppJid] = info
+func (c *hipchatClient) updateUserInfo(info *hipchatUser) {
+	c.usersByMention[info.Mention] = info
+	c.usersByJid[info.Jid] = info
 	c.usersByName[info.Name] = info
+	c.usersByEmail[info.Email] = info
 
-	return nil
+	logger.Debug.Println("User info obtained:", *info)
 }
