@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/ecwws/lisabot/lisaclient"
 	"github.com/ecwws/lisabot/logging"
+	"github.com/tbruyelle/hipchat-go/hipchat"
 	"os"
 	"strings"
 	"time"
@@ -24,10 +25,11 @@ type hipchatClient struct {
 	nick     string
 
 	// private
-	mentionNames  map[string]string
-	xmpp          *xmppConn
-	receivedUsers chan []*hipchatUser
-	// receivedRooms   chan []*Room
+	usersByMention  map[string]*hipchat.User
+	usersById       map[int]*hipchat.User
+	usersByName     map[string]*hipchat.User
+	usersByJid      map[string]*hipchat.User
+	xmpp            *xmppConn
 	receivedMessage chan *message
 	roomsByName     map[string]string
 	roomsById       map[string]string
@@ -38,18 +40,17 @@ type hipchatClient struct {
 	chatHost        string
 	mucHost         string
 	webHost         string
+	token           string
+	// tokenExp        int64
+	mention   string
+	api       *hipchat.Client
+	hipchatId int
 }
 
 type message struct {
 	From        string
 	To          string
 	Body        string
-	MentionName string
-}
-
-type hipchatUser struct {
-	Id          string
-	Name        string
 	MentionName string
 }
 
@@ -104,10 +105,14 @@ func main() {
 		nick:     *nick,
 
 		xmpp:            conn,
-		mentionNames:    make(map[string]string),
-		receivedUsers:   make(chan []*hipchatUser),
+		usersByMention:  make(map[string]*hipchat.User),
+		usersById:       make(map[int]*hipchat.User),
+		usersByJid:      make(map[string]*hipchat.User),
+		usersByName:     make(map[string]*hipchat.User),
 		receivedMessage: make(chan *message),
 		host:            hipchatHost,
+		roomsByName:     make(map[string]string),
+		roomsById:       make(map[string]string),
 	}
 
 	err = hc.initialize()
@@ -135,14 +140,7 @@ func main() {
 
 	// quit := make(chan int)
 
-	if logger.Level == "debug" {
-		hc.xmpp.Debug()
-	}
-
 	rooms := hc.xmpp.Discover(hc.jid, hc.mucHost)
-
-	hc.roomsByName = make(map[string]string)
-	hc.roomsById = make(map[string]string)
 
 	autojoin := make([]string, 0, len(rooms))
 
@@ -151,6 +149,17 @@ func main() {
 		hc.roomsById[room.Id] = room.Name
 		autojoin = append(autojoin, room.Id)
 	}
+
+	hc.api = hipchat.NewClient(hc.token)
+
+	logger.Debug.Println("hc api:", hc.api)
+
+	if err := hc.userLookUp(*user); err != nil {
+		logger.Error.Fatal("Unable to lookup info on myself:", err)
+	}
+
+	hc.mention = hc.usersByName[hc.nick].MentionName
+	hc.hipchatId = hc.usersByName[hc.nick].ID
 
 	hc.xmpp.Join(hc.jid, hc.nick, autojoin)
 
@@ -187,12 +196,18 @@ func (c *hipchatClient) initialize() error {
 				c.chatHost = info.ChatHost
 				c.mucHost = info.MucHost
 				c.webHost = info.WebHost
+				c.token = info.Token
+				// c.tokenExp = time.Now().Unix() + 2592000
 				logger.Debug.Println("JID:", c.jid)
+				logger.Debug.Println("Token:", info.Token)
 				return nil
 			}
 		case "proceed" + xmppNsTLS:
 			c.xmpp.UseTLS(c.host)
 			c.xmpp.StreamStart(c.id, c.host)
+			if logger.Level == "debug" {
+				c.xmpp.Debug()
+			}
 		}
 
 	}
@@ -261,6 +276,12 @@ mainLoop:
 		case <-keepAlive:
 			hc.xmpp.KeepAlive()
 			logger.Debug.Println("KeepAlive sent")
+			// within 60 seconds of token expiration
+			// if hc.tokenExp < time.Now().Unix()+60 {
+			if true {
+				hc.xmpp.AuthRequest(hc.username, hc.password, hc.resource)
+				logger.Info.Println("New token requested")
+			}
 		}
 	}
 }
@@ -291,9 +312,34 @@ func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
 			msgChan <- message
 
 			logger.Debug.Println(*message)
+		// case "success":
+		//  var auth authResponse
+		//  c.xmpp.AuthResp(&auth, &element)
+		//  if auth.Token != "" {
+		//   c.token = auth.Token
+		//   c.tokenExp = time.Now().Unix() + 2592000
+		//   logger.Debug.Println("New token:", c.token)
+		//  }
 		default:
 			c.xmpp.Skip()
 		}
 
 	}
+}
+
+func (c *hipchatClient) userLookUp(name string) error {
+	info, _, err := c.api.User.View(name)
+
+	if err != nil {
+		return err
+	}
+
+	logger.Debug.Println("User found:", info)
+
+	c.usersByMention[info.MentionName] = info
+	c.usersById[info.ID] = info
+	c.usersByJid[info.XmppJid] = info
+	c.usersByName[info.Name] = info
+
+	return nil
 }

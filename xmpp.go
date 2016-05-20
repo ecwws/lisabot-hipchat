@@ -17,6 +17,7 @@ const (
 	xmppNsHipchat  = "http://hipchat.com"
 	xmppNsDiscover = "http://jabber.org/protocol/disco#items"
 	xmppNsMuc      = "http://jabber.org/protocol/muc"
+	xmppNsAuth     = "http://hipchat.com/protocol/auth"
 
 	streamStart = `<stream:stream
 		xmlns='jabber:client'
@@ -58,13 +59,14 @@ type authResponse struct {
 	ChatHost string   `xml:"chat_host,attr"`
 	MucHost  string   `xml:"muc_host,attr"`
 	WebHost  string   `xml:"web_host,attr"`
+	Token    string   `xml:"oauth2_token,attr"`
 }
 
 type xmppIq struct {
 	XMLName xml.Name `xml:"iq"`
 	Type    string   `xml:"type,attr"`
 	Id      string   `xml:"id,attr"`
-	From    string   `xml:"from,attr"`
+	From    string   `xml:"from,attr,omitempty"`
 	To      string   `xml:"to,attr"`
 	Query   interface{}
 }
@@ -81,6 +83,7 @@ type xmppAuth struct {
 	XMLName xml.Name `xml:"auth"`
 	Ns      string   `xml:"xmlns,attr"`
 	Value   string   `xml:",chardata"`
+	Oauth   string   `xml:"oauth2_token,attr,omitempty"`
 }
 
 type xmppShow struct {
@@ -164,9 +167,22 @@ func (c *xmppConn) UseTLS(host string) {
 	c.encoder = xml.NewEncoder(c.raw)
 }
 
-func (c *xmppConn) Auth(username, password, resource string) (*authResponse, error) {
-	token := []byte{'\x00'}
+func (c *xmppConn) Auth(username, password,
+	resource string) (*authResponse, error) {
 
+	if err := c.AuthRequest(username, password, resource); err != nil {
+		return nil, err
+	}
+
+	var response authResponse
+
+	err := c.AuthResp(&response, nil)
+
+	return &response, err
+}
+
+func (c *xmppConn) AuthRequest(username, password, resource string) error {
+	token := []byte{'\x00'}
 	token = append(token, []byte(username)...)
 	token = append(token, '\x00')
 	token = append(token, []byte(password)...)
@@ -178,16 +194,20 @@ func (c *xmppConn) Auth(username, password, resource string) (*authResponse, err
 	auth := xmppAuth{
 		Ns:    xmppNsHipchat,
 		Value: encodedToken,
+		Oauth: "true",
 	}
 	// out, _ := xml.Marshal(auth)
 	// fmt.Println(string(out))
-	c.encoder.Encode(auth)
+	return c.encoder.Encode(auth)
+}
 
-	var response authResponse
+func (c *xmppConn) AuthResp(resp *authResponse,
+	element *xml.StartElement) error {
 
-	err := c.decoder.Decode(&response)
-
-	return &response, err
+	if element == nil {
+		return c.decoder.Decode(resp)
+	}
+	return c.DecodeElement(resp, element)
 }
 
 func (c *xmppConn) Available(from string) {
