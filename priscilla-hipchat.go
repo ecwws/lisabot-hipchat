@@ -4,8 +4,8 @@ import (
 	"encoding/xml"
 	"flag"
 	"fmt"
-	"github.com/ecwws/lisabot/lisaclient"
-	"github.com/ecwws/lisabot/logging"
+	"github.com/priscillachat/prisclient"
+	"github.com/priscillachat/prislog"
 	"os"
 	"regexp"
 	"strings"
@@ -63,23 +63,23 @@ type xmppMessage struct {
 	RoomId   string   `xml:"x>id,omitempty"`
 }
 
-var logger *logging.LisaLog
+var logger *prislog.PrisLog
 
 func main() {
 
 	user := flag.String("user", "", "hipchat username")
 	pass := flag.String("pass", "", "hipchat password")
-	nick := flag.String("nick", "Lisa Bot", "hipchat full name")
-	server := flag.String("server", "127.0.0.1", "lisabot server")
-	port := flag.String("port", "4517", "lisabot server port")
-	sourceid := flag.String("id", "lisabot-hipchat", "source id")
+	nick := flag.String("nick", "Priscilla", "hipchat full name")
+	server := flag.String("server", "127.0.0.1", "priscilla server")
+	port := flag.String("port", "4517", "priscilla server port")
+	sourceid := flag.String("id", "priscilla-hipchat", "source id")
 	loglevel := flag.String("loglevel", "warn", "loglevel")
 
 	flag.Parse()
 
 	var err error
 
-	logger, err = logging.NewLogger(os.Stdout, *loglevel)
+	logger, err = prislog.NewLogger(os.Stdout, *loglevel)
 
 	if err != nil {
 		fmt.Println("Error initializing logger: ", err)
@@ -89,7 +89,7 @@ func main() {
 	conn, err := xmppConnect(hipchatHost)
 
 	if err != nil {
-		logger.Error.Println("Error connecting to lisabot:", err)
+		logger.Error.Println("Error connecting to priscilla:", err)
 		os.Exit(1)
 	}
 
@@ -133,21 +133,21 @@ func main() {
 
 	hc.updateUserInfo(self)
 
-	lisa, err := lisaclient.NewClient(*server, *port, logger)
+	priscilla, err := prisclient.NewClient(*server, *port, logger)
 
 	if err != nil {
-		logger.Error.Println("Failed to create lisabot-hipchate:", err)
+		logger.Error.Println("Failed to create priscilla-hipchate:", err)
 		os.Exit(2)
 	}
 
-	err = lisa.Engage("adapter", *sourceid)
+	err = priscilla.Engage("adapter", *sourceid)
 
 	if err != nil {
 		logger.Error.Println("Failed to engage:", err)
 		os.Exit(3)
 	}
 
-	logger.Info.Println("LisaBot engaged")
+	logger.Info.Println("Priscilla engaged")
 
 	// quit := make(chan int)
 
@@ -165,7 +165,7 @@ func main() {
 
 	hc.xmpp.Available(hc.jid)
 
-	run(lisa, hc)
+	run(priscilla, hc)
 	// go hc.keepAlive()
 
 	// <-quit
@@ -220,13 +220,13 @@ func (c *hipchatClient) keepAlive(trigger chan<- bool) {
 	}
 }
 
-func run(lisa *lisaclient.LisaClient, hc *hipchatClient) {
+func run(priscilla *prisclient.Client, hc *hipchatClient) {
 	messageFromHC := make(chan *xmppMessage)
 	go hc.listen(messageFromHC)
 
-	fromLisa := make(chan *lisaclient.Query)
-	toLisa := make(chan *lisaclient.Query)
-	go lisa.Run(toLisa, fromLisa)
+	fromPris := make(chan *prisclient.Query)
+	toPris := make(chan *prisclient.Query)
+	go priscilla.Run(toPris, fromPris)
 
 	keepAlive := make(chan bool)
 	go hc.keepAlive(keepAlive)
@@ -259,11 +259,11 @@ mainLoop:
 					logger.Error.Println("Error searching for mention:", err)
 				}
 
-				clientQuery := lisaclient.Query{
+				clientQuery := prisclient.Query{
 					Type:   "message",
-					Source: lisa.SourceId,
+					Source: priscilla.SourceId,
 					To:     "server",
-					Message: &lisaclient.MessageBlock{
+					Message: &prisclient.MessageBlock{
 						Message:   msg.Body,
 						From:      fromNick,
 						Room:      hc.roomsById[fromRoom],
@@ -276,13 +276,13 @@ mainLoop:
 						"@"+hc.mention, "", -1)
 				}
 
-				toLisa <- &clientQuery
+				toPris <- &clientQuery
 			} else if msg.RoomName != "" {
 				hc.roomsByName[msg.RoomName] = msg.From
 				hc.roomsById[msg.From] = msg.RoomName
 				hc.xmpp.Join(hc.jid, hc.nick, []string{msg.From})
 			}
-		case query := <-fromLisa:
+		case query := <-fromPris:
 			logger.Debug.Println("Query received:", *query)
 			switch {
 			case query.Type == "command" &&
@@ -311,7 +311,7 @@ func (c *hipchatClient) groupMessage(room, message string) error {
 	return c.xmpp.Encode(&xmppMessage{
 		From: c.jid,
 		To:   room + "/" + c.nick,
-		Id:   lisaclient.RandomId(),
+		Id:   prisclient.RandomId(),
 		Type: "groupchat",
 		Body: message,
 	})

@@ -6,7 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"github.com/ecwws/lisabot/lisaclient"
+	"github.com/priscillachat/prisclient"
 	"io"
 	"net"
 )
@@ -225,7 +225,7 @@ func (c *xmppConn) AuthResp(resp *authResponse,
 
 func (c *xmppConn) Available(from string) {
 	available := xmppPresence{
-		Id:     lisaclient.RandomId(),
+		Id:     prisclient.RandomId(),
 		From:   from,
 		Status: &xmppShow{Value: "chat"},
 	}
@@ -236,7 +236,7 @@ func (c *xmppConn) Available(from string) {
 func (c *xmppConn) Discover(from, to string) []Room {
 	discover := xmppIq{
 		Type: "get",
-		Id:   lisaclient.RandomId(),
+		Id:   prisclient.RandomId(),
 		From: from,
 		To:   to,
 		Query: &emptyElement{
@@ -304,7 +304,7 @@ func (c *xmppConn) Decode(v interface{}) error {
 func (c *xmppConn) Join(from, nick string, rooms []string) {
 	for _, room := range rooms {
 		join := xmppPresence{
-			Id:   lisaclient.RandomId(),
+			Id:   prisclient.RandomId(),
 			From: from,
 			To:   room + "/" + nick,
 			Status: &emptyElement{
@@ -326,7 +326,7 @@ func (c *xmppConn) Encode(v interface{}) error {
 func (c *xmppConn) VCardRequest(jid, name string) error {
 	request := &xmppIq{
 		From: jid,
-		Id:   lisaclient.RandomId(),
+		Id:   prisclient.RandomId(),
 		Type: "get",
 		Query: &xmppVCard{
 			Ns: "vcard-temp",
