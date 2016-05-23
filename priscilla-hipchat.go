@@ -42,6 +42,7 @@ type hipchatClient struct {
 	webHost         string
 	token           string
 	mention         string
+	aMention        string
 }
 
 type message struct {
@@ -128,6 +129,7 @@ func main() {
 	}
 
 	hc.mention = self.Mention
+	hc.aMention = "@" + self.Mention
 
 	self.Jid = hc.jid
 
@@ -268,6 +270,8 @@ mainLoop:
 						From:      fromNick,
 						Room:      hc.roomsById[fromRoom],
 						Mentioned: mentioned,
+						Stripped: strings.Replace(msg.Body, hc.aMention,
+							"", -1),
 					},
 				}
 
@@ -291,8 +295,9 @@ mainLoop:
 				logger.Warn.Println("Disengage received, terminating...")
 				break mainLoop
 			case query.Type == "message":
-				hc.groupMessage(hc.roomsByName[query.Message.Room],
-					query.Message.Message)
+				hc.groupMessage(query.Message)
+				// hc.groupMessage(hc.roomsByName[query.Message.Room],
+				//  query.Message.Message)
 			}
 		case <-keepAlive:
 			hc.xmpp.KeepAlive()
@@ -307,14 +312,24 @@ mainLoop:
 	}
 }
 
-func (c *hipchatClient) groupMessage(room, message string) error {
-	return c.xmpp.Encode(&xmppMessage{
+func (c *hipchatClient) groupMessage(message *prisclient.MessageBlock) error {
+
+	xmppMsg := xmppMessage{
 		From: c.jid,
-		To:   room + "/" + c.nick,
+		To:   c.roomsByName[message.Room] + "/" + c.nick,
 		Id:   prisclient.RandomId(),
 		Type: "groupchat",
-		Body: message,
-	})
+		Body: message.Message,
+	}
+
+	if len(message.MentionNotify) > 0 {
+		for _, name := range message.MentionNotify {
+			if user, ok := c.usersByName[name]; ok {
+				xmppMsg.Body += " @" + user.Mention
+			}
+		}
+	}
+	return c.xmpp.Encode(&xmppMsg)
 }
 
 func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
