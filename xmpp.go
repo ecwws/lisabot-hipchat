@@ -131,6 +131,17 @@ func xmppConnect(host string) (*xmppConn, error) {
 	return c, nil
 }
 
+func (c *xmppConn) Disconnect() {
+	if c.raw != nil {
+		switch conn := c.raw.(type) {
+		case *net.TCPConn:
+			conn.Close()
+		case *tls.Conn:
+			conn.Close()
+		}
+	}
+}
+
 func (c *xmppConn) StreamStart(id, host string) {
 	fmt.Fprintf(c.raw, streamStart, id, host)
 }

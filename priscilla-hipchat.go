@@ -87,15 +87,6 @@ func main() {
 		os.Exit(-1)
 	}
 
-	conn, err := xmppConnect(hipchatHost)
-
-	if err != nil {
-		logger.Error.Println("Error connecting to priscilla:", err)
-		os.Exit(1)
-	}
-
-	logger.Info.Println("Connected")
-
 	hc := &hipchatClient{
 		username: *user,
 		password: *pass,
@@ -103,7 +94,7 @@ func main() {
 		id:       *user + "@" + hipchatHost,
 		nick:     *nick,
 
-		xmpp:            conn,
+		xmpp:            nil,
 		usersByMention:  make(map[string]*hipchatUser),
 		usersByJid:      make(map[string]*hipchatUser),
 		usersByName:     make(map[string]*hipchatUser),
@@ -113,27 +104,6 @@ func main() {
 		roomsByName:     make(map[string]string),
 		roomsById:       make(map[string]string),
 	}
-
-	err = hc.initialize()
-
-	if err != nil {
-		logger.Error.Fatal("Failed to initialize:", err)
-	}
-	logger.Info.Println("Authenticated")
-
-	hc.xmpp.VCardRequest(hc.jid, "")
-	self, err := hc.xmpp.VCardDecode(nil)
-
-	if err != nil {
-		logger.Error.Fatal("Failed to retrieve info on myself:", err)
-	}
-
-	hc.mention = self.Mention
-	hc.aMention = "@" + self.Mention
-
-	self.Jid = hc.jid
-
-	hc.updateUserInfo(self)
 
 	priscilla, err :=
 		prisclient.NewClient(*server, *port, "adapter", *sourceid, logger)
@@ -153,20 +123,6 @@ func main() {
 	logger.Info.Println("Priscilla engaged")
 
 	// quit := make(chan int)
-
-	rooms := hc.xmpp.Discover(hc.jid, hc.mucHost)
-
-	autojoin := make([]string, 0, len(rooms))
-
-	for _, room := range rooms {
-		hc.roomsByName[room.Name] = room.Id
-		hc.roomsById[room.Id] = room.Name
-		autojoin = append(autojoin, room.Id)
-	}
-
-	hc.xmpp.Join(hc.jid, hc.nick, autojoin)
-
-	hc.xmpp.Available(hc.jid)
 
 	run(priscilla, hc)
 	// go hc.keepAlive()
@@ -333,12 +289,80 @@ func (c *hipchatClient) groupMessage(message *prisclient.MessageBlock) error {
 	return c.xmpp.Encode(&xmppMsg)
 }
 
+func (c *hipchatClient) establishConnection() error {
+	var err error
+
+	c.xmpp, err = xmppConnect(hipchatHost)
+
+	if err != nil {
+		logger.Error.Println("Error connecting to hipchat:", err)
+		return err
+	}
+
+	logger.Info.Println("Connected to HipChat")
+
+	err = c.initialize()
+
+	if err != nil {
+		logger.Error.Println("Failed to initialize HipChat connection:", err)
+		return err
+	}
+	logger.Info.Println("Authenticated")
+
+	c.xmpp.VCardRequest(c.jid, "")
+	self, err := c.xmpp.VCardDecode(nil)
+
+	if err != nil {
+		logger.Error.Println("Failed to retrieve info on myself:", err)
+		return err
+	}
+
+	c.mention = self.Mention
+	c.aMention = "@" + self.Mention
+
+	self.Jid = c.jid
+
+	c.updateUserInfo(self)
+
+	rooms := c.xmpp.Discover(c.jid, c.mucHost)
+
+	autojoin := make([]string, 0, len(rooms))
+
+	for _, room := range rooms {
+		c.roomsByName[room.Name] = room.Id
+		c.roomsById[room.Id] = room.Name
+		autojoin = append(autojoin, room.Id)
+	}
+
+	c.xmpp.Join(c.jid, c.nick, autojoin)
+	c.xmpp.Available(c.jid)
+
+	return nil
+}
+
 func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
+
+	for err := c.establishConnection(); err != nil; err = c.establishConnection() {
+		logger.Error.Println("Failed to establish connection with hipchat:", err)
+		logger.Warn.Println("Sleeping 10 seconds before retry...")
+		c.xmpp.Disconnect()
+		time.Sleep(10 * time.Second)
+	}
 
 	for {
 		element, err := c.xmpp.RecvNext()
 
 		if err != nil {
+			logger.Error.Println(err)
+			if err.Error() == "EOF" {
+				for err := c.establishConnection(); err != nil; err = c.establishConnection() {
+					logger.Error.Println(
+						"Failed to establish connection with hipchat:", err)
+					logger.Warn.Println("Sleeping 10 seconds before retry...")
+					c.xmpp.Disconnect()
+					time.Sleep(10 * time.Second)
+				}
+			}
 			continue
 		}
 
