@@ -135,14 +135,15 @@ func main() {
 
 	hc.updateUserInfo(self)
 
-	priscilla, err := prisclient.NewClient(*server, *port, logger)
+	priscilla, err :=
+		prisclient.NewClient(*server, *port, "adapter", *sourceid, logger)
 
 	if err != nil {
 		logger.Error.Println("Failed to create priscilla-hipchate:", err)
 		os.Exit(2)
 	}
 
-	err = priscilla.Engage("adapter", *sourceid)
+	err = priscilla.Engage()
 
 	if err != nil {
 		logger.Error.Println("Failed to engage:", err)
