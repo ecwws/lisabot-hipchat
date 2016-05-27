@@ -106,21 +106,12 @@ func main() {
 	}
 
 	priscilla, err :=
-		prisclient.NewClient(*server, *port, "adapter", *sourceid, logger)
+		prisclient.NewClient(*server, *port, "adapter", *sourceid, true, logger)
 
 	if err != nil {
 		logger.Error.Println("Failed to create priscilla-hipchate:", err)
 		os.Exit(2)
 	}
-
-	err = priscilla.Engage()
-
-	if err != nil {
-		logger.Error.Println("Failed to engage:", err)
-		os.Exit(3)
-	}
-
-	logger.Info.Println("Priscilla engaged")
 
 	// quit := make(chan int)
 
@@ -180,6 +171,7 @@ func (c *hipchatClient) keepAlive(trigger chan<- bool) {
 }
 
 func run(priscilla *prisclient.Client, hc *hipchatClient) {
+
 	messageFromHC := make(chan *xmppMessage)
 	go hc.listen(messageFromHC)
 
