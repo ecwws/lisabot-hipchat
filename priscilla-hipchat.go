@@ -346,14 +346,14 @@ func (c *hipchatClient) listen(msgChan chan<- *xmppMessage) {
 
 		if err != nil {
 			logger.Error.Println(err)
-			if err.Error() == "EOF" {
-				for err := c.establishConnection(); err != nil; err = c.establishConnection() {
-					logger.Error.Println(
-						"Failed to establish connection with hipchat:", err)
-					logger.Warn.Println("Sleeping 10 seconds before retry...")
-					c.xmpp.Disconnect()
-					time.Sleep(10 * time.Second)
-				}
+			c.xmpp.Disconnect()
+
+			for err := c.establishConnection(); err != nil; err = c.establishConnection() {
+				logger.Error.Println(
+					"Failed to establish connection with hipchat:", err)
+				logger.Warn.Println("Sleeping 10 seconds before retry...")
+				c.xmpp.Disconnect()
+				time.Sleep(10 * time.Second)
 			}
 			continue
 		}
