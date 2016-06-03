@@ -75,6 +75,8 @@ func main() {
 	port := flag.String("port", "4517", "priscilla server port")
 	sourceid := flag.String("id", "priscilla-hipchat", "source id")
 	loglevel := flag.String("loglevel", "warn", "loglevel")
+	secret := flag.String("secret", "abcdefg",
+		"secret for access priscilla server")
 
 	flag.Parse()
 
@@ -105,8 +107,8 @@ func main() {
 		roomsById:       make(map[string]string),
 	}
 
-	priscilla, err :=
-		prisclient.NewClient(*server, *port, "adapter", *sourceid, true, logger)
+	priscilla, err := prisclient.NewClient(*server, *port, "adapter",
+		*sourceid, *secret, true, logger)
 
 	if err != nil {
 		logger.Error.Println("Failed to create priscilla-hipchate:", err)
@@ -211,9 +213,8 @@ mainLoop:
 				}
 
 				clientQuery := prisclient.Query{
-					Type:   "message",
-					Source: priscilla.SourceId,
-					To:     "server",
+					Type: "message",
+					To:   "server",
 					Message: &prisclient.MessageBlock{
 						Message:   msg.Body,
 						From:      fromNick,
