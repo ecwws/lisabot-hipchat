@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/priscillachat/prisclient"
 	"github.com/priscillachat/prislog"
+	"github.com/tbruyelle/hipchat-go/hipchat"
 	"os"
 	"regexp"
 	"strings"
@@ -25,24 +26,24 @@ type hipchatClient struct {
 	nick     string
 
 	// private
-	usersByMention  map[string]*hipchatUser
-	usersByName     map[string]*hipchatUser
-	usersByJid      map[string]*hipchatUser
-	usersByEmail    map[string]*hipchatUser
-	xmpp            *xmppConn
-	receivedMessage chan *message
-	roomsByName     map[string]string
-	roomsById       map[string]string
-	host            string
-	jid             string
-	accountId       string
-	apiHost         string
-	chatHost        string
-	mucHost         string
-	webHost         string
-	token           string
-	mention         string
-	aMention        string
+	usersByMention map[string]*hipchatUser
+	usersByName    map[string]*hipchatUser
+	usersByJid     map[string]*hipchatUser
+	usersByEmail   map[string]*hipchatUser
+	xmpp           *xmppConn
+	roomsByName    map[string]string
+	roomsById      map[string]string
+	host           string
+	jid            string
+	accountId      string
+	apiHost        string
+	chatHost       string
+	mucHost        string
+	webHost        string
+	token          string
+	mention        string
+	aMention       string
+	api            *hipchat.Client
 }
 
 type message struct {
@@ -96,15 +97,14 @@ func main() {
 		id:       *user + "@" + hipchatHost,
 		nick:     *nick,
 
-		xmpp:            nil,
-		usersByMention:  make(map[string]*hipchatUser),
-		usersByJid:      make(map[string]*hipchatUser),
-		usersByName:     make(map[string]*hipchatUser),
-		usersByEmail:    make(map[string]*hipchatUser),
-		receivedMessage: make(chan *message),
-		host:            hipchatHost,
-		roomsByName:     make(map[string]string),
-		roomsById:       make(map[string]string),
+		xmpp:           nil,
+		usersByMention: make(map[string]*hipchatUser),
+		usersByJid:     make(map[string]*hipchatUser),
+		usersByName:    make(map[string]*hipchatUser),
+		usersByEmail:   make(map[string]*hipchatUser),
+		host:           hipchatHost,
+		roomsByName:    make(map[string]string),
+		roomsById:      make(map[string]string),
 	}
 
 	priscilla, err := prisclient.NewClient(*server, *port, "adapter",
@@ -149,7 +149,7 @@ func (c *hipchatClient) initialize() error {
 				c.mucHost = info.MucHost
 				c.webHost = info.WebHost
 				c.token = info.Token
-				// c.tokenExp = time.Now().Unix() + 2592000
+				c.api = hipchat.NewClient(c.token)
 				logger.Debug.Println("JID:", c.jid)
 				logger.Debug.Println("Token:", info.Token)
 				return nil
@@ -163,6 +163,30 @@ func (c *hipchatClient) initialize() error {
 		}
 
 	}
+	return nil
+}
+
+func (c *hipchatClient) populateUser(jid string) error {
+	idFull := strings.Split(jid, "@")[0]
+	id := strings.Split(idFull, "_")[1]
+	user, _, err := c.api.User.View(id)
+
+	if err != nil {
+		return err
+	}
+
+	logger.Debug.Println("User found:", user)
+	hcUser := &hipchatUser{
+		Jid:     user.XmppJid,
+		Name:    user.Name,
+		Mention: user.MentionName,
+		Email:   user.Email,
+	}
+	c.usersByMention[hcUser.Mention] = hcUser
+	c.usersByName[hcUser.Name] = hcUser
+	c.usersByJid[hcUser.Jid] = hcUser
+	c.usersByEmail[hcUser.Email] = hcUser
+
 	return nil
 }
 
@@ -202,7 +226,8 @@ mainLoop:
 
 			if msg.FromJid != "" {
 				if _, exist := hc.usersByJid[msg.FromJid]; !exist {
-					hc.xmpp.VCardRequest(hc.jid, msg.FromJid)
+					// hc.xmpp.VCardRequest(hc.jid, msg.FromJid)
+					hc.populateUser(msg.FromJid)
 				}
 			}
 
@@ -230,6 +255,15 @@ mainLoop:
 						"@"+hc.mention, "", -1)
 				}
 
+				if user, exists := hc.usersByName[fromNick]; exists {
+					clientQuery.Message.User = &prisclient.UserInfo{
+						Id:      user.Jid,
+						Name:    user.Name,
+						Mention: user.Mention,
+						Email:   user.Email,
+					}
+				}
+
 				toPris <- &clientQuery
 			} else if msg.RoomName != "" {
 				hc.roomsByName[msg.RoomName] = msg.From
@@ -239,11 +273,45 @@ mainLoop:
 		case query := <-fromPris:
 			logger.Debug.Println("Query received:", *query)
 			switch {
-			case query.Type == "command" &&
-				query.Command.Action == "disengage":
-				// either server forcing disengage or server connection lost
-				logger.Warn.Println("Disengage received, terminating...")
-				break mainLoop
+			case query.Type == "command":
+				switch query.Command.Action {
+				case "disengage":
+					// either server forcing disengage or server connection lost
+					logger.Warn.Println("Disengage received, terminating...")
+					break mainLoop
+				case "user_request":
+					userResponse := prisclient.Query{
+						Type: "command",
+						To:   query.Source,
+						Command: &prisclient.CommandBlock{
+							Id:     query.Command.Id,
+							Action: "info",
+							Type:   "user",
+							Map:    map[string]string{},
+						},
+					}
+					var user *hipchatUser
+					var exists bool
+					switch query.Command.Type {
+					case "user":
+						user, exists = hc.usersByName[query.Command.Data]
+					case "mention":
+						user, exists = hc.usersByMention[query.Command.Data]
+					case "email":
+						user, exists = hc.usersByEmail[query.Command.Data]
+					case "id":
+						user, exists = hc.usersByJid[query.Command.Data]
+					}
+					if exists {
+						userResponse.Command.Map["id"] = user.Jid
+						userResponse.Command.Map["name"] = user.Name
+						userResponse.Command.Map["mention"] = user.Mention
+						userResponse.Command.Map["email"] = user.Email
+						toPris <- &userResponse
+					} else {
+					}
+				case "room_request":
+				}
 			case query.Type == "message":
 				hc.groupMessage(query.Message)
 				// hc.groupMessage(hc.roomsByName[query.Message.Room],
