@@ -280,37 +280,62 @@ mainLoop:
 					logger.Warn.Println("Disengage received, terminating...")
 					break mainLoop
 				case "user_request":
-					userResponse := prisclient.Query{
+					fallthrough
+				case "room_request":
+					response := prisclient.Query{
 						Type: "command",
 						To:   query.Source,
 						Command: &prisclient.CommandBlock{
 							Id:     query.Command.Id,
 							Action: "info",
-							Type:   "user",
 							Map:    map[string]string{},
 						},
 					}
-					var user *hipchatUser
-					var exists bool
-					switch query.Command.Type {
-					case "user":
-						user, exists = hc.usersByName[query.Command.Data]
-					case "mention":
-						user, exists = hc.usersByMention[query.Command.Data]
-					case "email":
-						user, exists = hc.usersByEmail[query.Command.Data]
-					case "id":
-						user, exists = hc.usersByJid[query.Command.Data]
-					}
-					if exists {
-						userResponse.Command.Map["id"] = user.Jid
-						userResponse.Command.Map["name"] = user.Name
-						userResponse.Command.Map["mention"] = user.Mention
-						userResponse.Command.Map["email"] = user.Email
-						toPris <- &userResponse
+					if query.Command.Action == "user_request" {
+						var user *hipchatUser
+						var exists bool
+
+						response.Command.Type = "user"
+						switch query.Command.Type {
+						case "user":
+							user, exists = hc.usersByName[query.Command.Data]
+						case "mention":
+							user, exists = hc.usersByMention[query.Command.Data]
+						case "email":
+							user, exists = hc.usersByEmail[query.Command.Data]
+						case "id":
+							user, exists = hc.usersByJid[query.Command.Data]
+						}
+						if exists {
+							response.Command.Map["id"] = user.Jid
+							response.Command.Map["name"] = user.Name
+							response.Command.Map["mention"] = user.Mention
+							response.Command.Map["email"] = user.Email
+						} else {
+							response.Command.Error = "User not found"
+						}
 					} else {
+						response.Command.Type = "room"
+						switch query.Command.Type {
+						case "name":
+							id, exists := hc.roomsByName[query.Command.Data]
+							if exists {
+								response.Command.Map["id"] = id
+								response.Command.Map["name"] = query.Command.Data
+							} else {
+								response.Command.Error = "Room not found"
+							}
+						case "id":
+							name, exists := hc.roomsById[query.Command.Data]
+							if exists {
+								response.Command.Map["name"] = name
+								response.Command.Map["id"] = query.Command.Data
+							} else {
+								response.Command.Error = "Room not found"
+							}
+						}
 					}
-				case "room_request":
+					toPris <- &response
 				}
 			case query.Type == "message":
 				hc.groupMessage(query.Message)
