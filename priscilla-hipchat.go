@@ -7,6 +7,8 @@ import (
 	"github.com/priscillachat/prisclient"
 	"github.com/priscillachat/prislog"
 	"github.com/tbruyelle/hipchat-go/hipchat"
+	"gopkg.in/yaml.v2"
+	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
@@ -65,6 +67,14 @@ type xmppMessage struct {
 	RoomId   string   `xml:"x>id,omitempty"`
 }
 
+type config struct {
+	Adapters map[string]adapterConfig `yaml:"adapters"`
+}
+
+type adapterConfig struct {
+	Params map[string]*string `yaml:"params"`
+}
+
 var logger *prislog.PrisLog
 
 func main() {
@@ -78,10 +88,61 @@ func main() {
 	loglevel := flag.String("loglevel", "warn", "loglevel")
 	secret := flag.String("secret", "abcdefg",
 		"secret for access priscilla server")
+	confFile := flag.String("conf", "",
+		"Priscilla config file, overrides command line options")
+	confName := flag.String("confname", "",
+		"Name of the config subsection (under \"adapters\")")
 
 	flag.Parse()
 
 	var err error
+	var conf config
+
+	if *confFile != "" && *confName != "" {
+		confRaw, err := ioutil.ReadFile(*confFile)
+
+		if err != nil {
+			fmt.Println("Error reading conf file:", err)
+			os.Exit(1)
+		}
+
+		err = yaml.Unmarshal(confRaw, &conf)
+
+		if err != nil {
+			fmt.Println("Error parsing conf file:", err)
+			os.Exit(1)
+		}
+
+		if hcconf, ok := conf.Adapters[*confName]; ok {
+			if value, ok := hcconf.Params["user"]; ok {
+				user = value
+			}
+			if value, ok := hcconf.Params["pass"]; ok {
+				pass = value
+			}
+			if value, ok := hcconf.Params["nick"]; ok {
+				nick = value
+			}
+			if value, ok := hcconf.Params["server"]; ok {
+				server = value
+			}
+			if value, ok := hcconf.Params["port"]; ok {
+				port = value
+			}
+			if value, ok := hcconf.Params["id"]; ok {
+				sourceid = value
+			}
+			if value, ok := hcconf.Params["loglevel"]; ok {
+				loglevel = value
+			}
+			if value, ok := hcconf.Params["secret"]; ok {
+				secret = value
+			}
+		} else {
+			fmt.Println(*confName, "is not found in config adapters section")
+			os.Exit(1)
+		}
+	}
 
 	logger, err = prislog.NewLogger(os.Stdout, *loglevel)
 
