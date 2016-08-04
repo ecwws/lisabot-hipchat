@@ -68,6 +68,8 @@ type xmppMessage struct {
 }
 
 type config struct {
+	Port     int                      `yaml:"port"`
+	Secret   string                   `yaml:"secret"`
 	Adapters map[string]adapterConfig `yaml:"adapters"`
 }
 
@@ -92,6 +94,7 @@ func main() {
 		"Priscilla config file, overrides command line options")
 	confName := flag.String("confname", "",
 		"Name of the config subsection (under \"adapters\")")
+	logfile := flag.String("logfile", "STDOUT", "Log file")
 
 	flag.Parse()
 
@@ -102,49 +105,66 @@ func main() {
 		confRaw, err := ioutil.ReadFile(*confFile)
 
 		if err != nil {
-			fmt.Println("Error reading conf file:", err)
+			fmt.Fprintln(os.Stderr, "Error reading conf file:", err)
 			os.Exit(1)
 		}
 
 		err = yaml.Unmarshal(confRaw, &conf)
 
 		if err != nil {
-			fmt.Println("Error parsing conf file:", err)
+			fmt.Fprintln(os.Stderr, "Error parsing conf file:", err)
 			os.Exit(1)
 		}
 
+		if conf.Port != 0 {
+			*port = fmt.Sprintf("%d", conf.Port)
+		}
+
+		if conf.Secret != "" {
+			secret = &conf.Secret
+		}
+
 		if hcconf, ok := conf.Adapters[*confName]; ok {
-			if value, ok := hcconf.Params["user"]; ok {
-				user = value
-			}
-			if value, ok := hcconf.Params["pass"]; ok {
-				pass = value
-			}
-			if value, ok := hcconf.Params["nick"]; ok {
-				nick = value
-			}
-			if value, ok := hcconf.Params["server"]; ok {
-				server = value
-			}
-			if value, ok := hcconf.Params["port"]; ok {
-				port = value
-			}
-			if value, ok := hcconf.Params["id"]; ok {
-				sourceid = value
-			}
-			if value, ok := hcconf.Params["loglevel"]; ok {
-				loglevel = value
-			}
-			if value, ok := hcconf.Params["secret"]; ok {
-				secret = value
+			for key, value := range hcconf.Params {
+				switch key {
+				case "user":
+					user = value
+				case "pass":
+					pass = value
+				case "nick":
+					nick = value
+				case "server":
+					server = value
+				case "id":
+					sourceid = value
+				case "loglevel":
+					loglevel = value
+				case "logfile":
+					logfile = value
+				}
 			}
 		} else {
-			fmt.Println(*confName, "is not found in config adapters section")
+			fmt.Fprintln(os.Stderr, *confName,
+				"is not found in config adapters section")
 			os.Exit(1)
 		}
 	}
 
-	logger, err = prislog.NewLogger(os.Stdout, *loglevel)
+	var logwriter *os.File
+
+	if *logfile == "STDOUT" {
+		logwriter = os.Stdout
+	} else {
+		logwriter, err = os.OpenFile(*logfile,
+			os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+		if err != nil {
+			fmt.Println("Unable to write to log file", *logfile, ":", err)
+			os.Exit(1)
+		}
+		defer logwriter.Close()
+	}
+
+	logger, err = prislog.NewLogger(logwriter, *loglevel)
 
 	if err != nil {
 		fmt.Println("Error initializing logger: ", err)
